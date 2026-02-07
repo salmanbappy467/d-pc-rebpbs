@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>mtRoom auto</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg: #0b0f19; --panel: #1e293b; --accent: #3b82f6; --text: #e2e8f0; --green: #10b981; --red: #ef4444; --orange: #f59e0b; }
+        * { box-sizing: border-box; }
+        body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; margin: 0; padding: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; user-select: none; border: 1px solid #334155; }
+        .header { height: 32px; background: var(--panel); display: flex; justify-content: space-between; align-items: center; padding: 0 10px; -webkit-app-region: drag; border-bottom: 1px solid #334155; }
+        /* ইমেজ সাইজ এবং স্টাইল */
+        .title-box { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: bold; color: #94a3b8; pointer-events: none; }
+        .title-box img { height: 18px; width: 18px; opacity: 1; display: block; } /* Opacity 1 করা হয়েছে */
+        
+        .close-btn { cursor: pointer; color: #64748b; font-size: 16px; -webkit-app-region: no-drag; padding: 4px 8px; }
+        .close-btn:hover { color: var(--red); }
+        .main-content { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; }
+        .ring-box { position: relative; width: 80px; height: 80px; display: flex; justify-content: center; align-items: center; }
+        .status-ring { width: 100%; height: 100%; border-radius: 50%; border: 4px solid var(--panel); position: absolute; transition: 0.3s; }
+        .icon { font-size: 30px; z-index: 2; }
+        .active .status-ring { border-color: var(--green); box-shadow: 0 0 15px rgba(16, 185, 129, 0.3); }
+        .error .status-ring { border-color: var(--red); }
+        .work .status-ring { border-color: var(--orange); animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+        .status-txt { font-size: 12px; font-weight: bold; margin-top: 5px; color: #fff; }
+        .pbs-btn { background: var(--panel); border: 1px solid #334155; padding: 8px 15px; border-radius: 20px; font-size: 10px; color: #fff; cursor: pointer; font-weight: bold; }
+        .footer { height: 40px; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; border-top: 1px solid #1e293b; background: #0f172a; }
+        .setting-icon { font-size: 18px; cursor: pointer; opacity: 0.6; }
+        .setting-icon:hover { opacity: 1; color: var(--accent); }
+        .overlay { position: absolute; bottom: 45px; left: 10px; right: 10px; background: var(--panel); padding: 10px; border-radius: 6px; border: 1px solid var(--accent); display: none; box-shadow: 0 -5px 20px rgba(0,0,0,0.6); z-index: 10; }
+        .overlay.show { display: block; }
+        input { width: 100%; background: #0b0f19; border: 1px solid #334155; color: #fff; padding: 8px; font-size: 11px; margin-bottom: 8px; }
+        button.save-mini { width: 100%; background: var(--accent); color: white; border: none; padding: 6px; font-size: 10px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="title-box"><img src="./icon.ico" alt="Logo"><span>mtRoom Auto</span></div>
+        <span class="close-btn" onclick="minimize()">✕</span>
+    </div>
+    <div class="main-content">
+        <div class="ring-box" id="ringBox"><div class="status-ring"></div><div class="icon" id="s-icon">⏳</div></div>
+        <div class="status-txt" id="status-txt">STARTING...</div>
+        <button class="pbs-btn" onclick="openWeb()">🌐 OPEN PBSNET</button>
+        
+        <div class="overlay" id="serverOverlay">
+            <input type="text" id="serverInput" placeholder="Server URL">
+            <button class="save-mini" onclick="saveSetting('server')">SAVE SERVER</button>
+        </div>
+        <div class="overlay" id="keyOverlay">
+            <input type="password" id="keyInput" placeholder="API KEY">
+            <button class="save-mini" onclick="saveSetting('key')">SAVE KEY</button>
+        </div>
+    </div>
+    <div class="footer">
+        <div class="setting-icon" onclick="toggleOverlay('serverOverlay')" title="Server">⚙️</div>
+        <div class="setting-icon" onclick="toggleOverlay('keyOverlay')" title="API Key">🔑</div>
+    </div>
+    <script>
+        const { ipcRenderer } = require('electron');
+        const Store = require('electron-store');
+        const store = new Store();
+
+        const conf = store.get('config') || {};
+        document.getElementById('serverInput').value = conf.serverUrl || 'https://mtroom-server.koyeb.app';
+        document.getElementById('keyInput').value = conf.apiKey || '';
+
+        ipcRenderer.on('status-update', (e, data) => {
+            document.getElementById('status-txt').innerText = data.msg;
+            const ringBox = document.getElementById('ringBox');
+            const icon = document.getElementById('s-icon');
+            ringBox.className = 'ring-box ' + data.type;
+            const icons = { 'active': '🟢', 'success': '✅', 'work': '⚙️', 'error': '⚠️', 'default': '⚡' };
+            icon.innerText = icons[data.type] || icons['default'];
+        });
+
+        function toggleOverlay(id) {
+            document.querySelectorAll('.overlay').forEach(el => { if(el.id !== id) el.classList.remove('show'); });
+            document.getElementById(id).classList.toggle('show');
+        }
+
+        function saveSetting(type) {
+            const el = document.getElementById(type === 'server' ? 'serverInput' : 'keyInput');
+            ipcRenderer.send('save-setting', { type, value: el.value });
+            document.getElementById(type === 'server' ? 'serverOverlay' : 'keyOverlay').classList.remove('show');
+        }
+
+        function openWeb() { ipcRenderer.send('open-web'); }
+        function minimize() { ipcRenderer.send('minimize'); }
+    </script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "name": "mtroom-auto",
+  "version": "2.3.4",
+  "description": "mtRoom Auto Client Final",
+  "main": "main.js",
+  "author": "Salman Bappy",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "dependencies": {
+    "auto-launch": "^5.0.5",
+    "axios": "^1.6.7",
+    "cheerio": "^1.0.0-rc.12",
+    "electron-store": "^8.1.0",
+    "socket.io-client": "^4.7.4",
+    "uuid": "^9.0.1",
+    "qs": "^6.11.2"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.12.0"
+  },
+  "build": {
+    "appId": "com.mtroom.auto",
+    "productName": "mtRoom auto",
+    "asar": true,
+    "files": [
+      "**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "runAfterFinish": true
+    }
+  }
+}
