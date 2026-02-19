@@ -1,97 +1,131 @@
-// worker.js - Final Fix for "Unknown Action"
 const io = require('socket.io-client');
-const rebpbs = require('./rebpbs'); 
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 let socket = null;
 let pingInterval = null;
+let updateInterval = null;
+let SCRIPTS_PATH = '';
+
+function getFileHash(filePath) {
+    if (!fs.existsSync(filePath)) return null;
+    const content = fs.readFileSync(filePath);
+    return crypto.createHash('md5').update(content).digest('hex');
+}
 
 function startWorker(config, sendToUI) {
-    const { serverUrl, apiKey, machineId } = config;
+    const { serverUrl, apiKey, machineId, scriptsDir } = config;
+    SCRIPTS_PATH = scriptsDir;
 
-    // ক্লিনআপ
-    if (socket) {
-        if (pingInterval) clearInterval(pingInterval);
-        socket.disconnect();
-        socket.removeAllListeners();
-        socket = null;
-    }
+    if (socket) stopWorker();
 
-    console.log(`🔌 Server: ${serverUrl}`);
-    console.log(`🆔 ID: ${machineId}`);
+    console.log(`🔌 Connecting to: ${serverUrl}`);
 
-    // কানেকশন অপশন
     socket = io(serverUrl, {
         query: { type: 'worker' },
         auth: { machineId, apiKey },
-        reconnection: true,             
-        reconnectionAttempts: Infinity, 
-        reconnectionDelay: 2000,        
-        timeout: 20000,                 
-        transports: ['websocket', 'polling'],
+        reconnection: true,
         forceNew: true
     });
 
     socket.on('connect', () => {
-        console.log('✅ Connected');
-        sendToUI({ msg: 'ONLINE', type: 'success' });
+        sendToUI({ msg: 'ONLINE', type: 'active' });
         
-        // Keep-Alive Heartbeat
-        if (pingInterval) clearInterval(pingInterval);
+        // কানেক্ট হওয়ার সাথে সাথে স্ক্রিপ্ট চেক
+        console.log("📥 Checking for script updates...");
+        socket.emit('get_scripts_manifest');
+
         pingInterval = setInterval(() => {
-            if (socket.connected) {
-                socket.emit('worker_ping', { uptime: process.uptime() });
+            if (socket.connected) socket.emit('worker_ping', { uptime: process.uptime() });
+        }, 20000);
+
+        // প্রতি মিনিটে অটো আপডেট চেক
+        updateInterval = setInterval(() => {
+            if (socket.connected) socket.emit('get_scripts_manifest');
+        }, 60000);
+    });
+
+    // সার্ভার থেকে স্ক্রিপ্ট লিস্ট রিসিভ
+    socket.on('scripts_manifest', (manifest) => {
+        let updatesNeeded = 0;
+        if (!Array.isArray(manifest)) return;
+
+        manifest.forEach(remoteFile => {
+            const localPath = path.join(SCRIPTS_PATH, remoteFile.name);
+            
+            // ফাইল না থাকলে বা হ্যাশ না মিললে ডাউনলোড রিকোয়েস্ট (সার্ভার থেকে)
+            if (getFileHash(localPath) !== remoteFile.hash) {
+                console.log(`⬇️ Syncing Script: ${remoteFile.name}`);
+                socket.emit('request_file', remoteFile.name);
+                updatesNeeded++;
             }
-        }, 25000); 
-    });
+        });
 
-    socket.on('disconnect', (reason) => {
-        console.log(`⚠️ Disconnected: ${reason}`);
-        sendToUI({ msg: 'OFFLINE', type: 'error' });
-    });
-
-    socket.on('connect_error', (err) => {
-        if (err.message.includes("auth")) {
-            sendToUI({ msg: 'AUTH FAILED', type: 'error' });
-        } else {
-            sendToUI({ msg: 'RETRYING...', type: 'sync' });
+        if (updatesNeeded > 0) {
+            sendToUI({ msg: 'UPDATING...', type: 'sync' });
         }
     });
 
-    socket.on('execute_task', async (job) => {
-        console.log(`⚡ Raw Task: ${job.taskType}`);
-        sendToUI({ msg: 'WORKING...', type: 'work' });
-
+    // স্ক্রিপ্ট রিসিভ এবং সেভ
+    socket.on('receive_file', (file) => {
         try {
-            // 🔥 ফিক্স: অ্যাকশন নাম ঠিক করা
-            let actionName = job.taskType;
+            const filePath = path.join(SCRIPTS_PATH, file.name);
+            fs.writeFileSync(filePath, file.content);
             
-            // ১. যদি টাস্কের নাম ফাইলের নাম হয় (যেমন: rebpbs.js), তবে এটি আসল অ্যাকশন নয়
-            if (actionName.toLowerCase().endsWith('.js')) {
-                // পে-লোড এর ভেতর আসল অ্যাকশন খুঁজব, না পেলে 'CHECK'
-                actionName = job.payload.action || 'CHECK';
+            // মেমোরি থেকে পুরোনো ভার্সন ডিলিট (Hot Reload)
+            try { delete require.cache[require.resolve(filePath)]; } catch(e){}
+            
+            console.log(`✅ Updated: ${file.name}`);
+            sendToUI({ msg: 'UPDATED', type: 'success' });
+            setTimeout(() => sendToUI({ msg: 'ONLINE', type: 'active' }), 1500);
+        } catch (e) { 
+            console.error("Write Error:", e);
+        }
+    });
+
+    // টাস্ক এক্সিকিউশন
+    socket.on('execute_task', async (job) => {
+        sendToUI({ msg: 'WORKING...', type: 'work' });
+        try {
+            let scriptName = job.taskType.endsWith('.js') ? job.taskType : `${job.taskType}.js`;
+            const scriptPath = path.join(SCRIPTS_PATH, scriptName);
+
+            // ফাইল না থাকলে ডাউনলোড চেয়ে অপেক্ষা করা
+            if (!fs.existsSync(scriptPath)) {
+                socket.emit('request_file', scriptName);
+                throw new Error(`Script '${scriptName}' missing. Downloading... please retry.`);
             }
 
-            console.log(`▶ Process Action: ${actionName}`);
+            // ডাইনামিক লোড
+            delete require.cache[require.resolve(scriptPath)];
+            const scriptModule = require(scriptPath); // Fixed Variable Name
 
-            const result = await rebpbs.run({
+            if (!scriptModule.run) throw new Error("Invalid Script: No 'run' function found.");
+
+            console.log(`▶ Running ${scriptName}`);
+            const result = await scriptModule.run({
                 ...job.payload,
-                action: actionName // ঠিক করা অ্যাকশন পাঠানো হলো
+                action: job.payload.action || 'CHECK'
             });
 
-            sendResult(job.requestId, result);
+            socket.emit('task_completed', { requestId: job.requestId, result });
             sendToUI({ msg: 'DONE', type: 'success' });
             setTimeout(() => sendToUI({ msg: 'ONLINE', type: 'active' }), 2000);
 
         } catch (error) {
-            console.error(`❌ Error: ${error.message}`);
-            sendResult(job.requestId, { error: error.message });
+            console.error(`❌ Task Error: ${error.message}`);
+            socket.emit('task_completed', { requestId: job.requestId, result: { error: error.message } });
             sendToUI({ msg: 'FAILED', type: 'error' });
+            setTimeout(() => sendToUI({ msg: 'ONLINE', type: 'active' }), 3000);
         }
     });
-
-    function sendResult(id, res) {
-        socket.emit('task_completed', { requestId: id, result: res });
-    }
 }
 
-module.exports = { startWorker };
+function stopWorker() {
+    if (socket) { socket.disconnect(); socket = null; }
+    if (pingInterval) clearInterval(pingInterval);
+    if (updateInterval) clearInterval(updateInterval);
+}
+
+module.exports = { startWorker, stopWorker };

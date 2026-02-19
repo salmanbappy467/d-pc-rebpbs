@@ -1,33 +1,37 @@
 {
   "name": "mtroom-auto",
-  "version": "2.3.4",
-  "description": "mtRoom Auto Client Final",
+  "version": "4.3.0",
+  "description": "mtRoom Auto - Final Fixed",
   "main": "main.js",
   "author": "Salman Bappy",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win"
+    "build": "electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
-    "auto-launch": "^5.0.5",
+    "adm-zip": "^0.5.10",
     "axios": "^1.6.7",
-    "cheerio": "^1.0.0-rc.12",
+    "auto-launch": "^5.0.5",
     "electron-store": "^8.1.0",
     "socket.io-client": "^4.7.4",
-    "uuid": "^9.0.1",
-    "qs": "^6.11.2"
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
     "electron": "^29.0.0",
-    "electron-builder": "^24.12.0"
+    "electron-builder": "^24.13.3"
   },
   "build": {
     "appId": "com.mtroom.auto",
-    "productName": "mtRoom auto",
+    "productName": "mtRoom Auto",
     "asar": true,
     "files": [
       "**/*"
     ],
+    "extraResources": [],
+    "directories": {
+      "buildResources": "build"
+    },
     "win": {
       "target": "nsis",
       "icon": "icon.ico",
@@ -37,7 +41,10 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "runAfterFinish": true
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh",
+      "guid": "5315f608-4122-4212-9214-142272461876"
     }
   }
 }
